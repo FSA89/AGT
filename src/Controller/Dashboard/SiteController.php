@@ -15,6 +15,7 @@ use App\Message\ExternalScript\UpdateNsMessage;
 use App\Message\ExternalScript\VerifyYandexMessage;
 use App\Message\ExternalScript\VerifyGscMessage;
 use App\Message\ExternalScript\SetupProxyMessage;
+use App\Message\ExternalScript\SendIndexMessage;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -23,6 +24,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\Messenger\MessageBusInterface;
+
 
 #[Route('/dashboard')]
 class SiteController extends AbstractController
@@ -186,6 +188,11 @@ class SiteController extends AbstractController
                             case 'cmd:setup_proxy':
                                 $site->setStatusProxy('In Queue...');
                                 $bus->dispatch(new SetupProxyMessage($site->getId()));
+                                $dispatchedTasks++;
+                                break;
+                            case 'cmd:send_index':
+                                $site->setIndexingStatus('In Queue...');
+                                $bus->dispatch(new \App\Message\ExternalScript\SendIndexMessage($site->getId()));
                                 $dispatchedTasks++;
                                 break;
                             default:
