@@ -32,3 +32,4 @@ framework:
       'App\Message\ExternalScript\ParseStructureMessage': async
       'App\Message\ExternalScript\VerifyYandexMessage': async
       'App\Message\ExternalScript\VerifyGscMessage': async
+      'App\Message\ExternalScript\SendIndexMessage': async
