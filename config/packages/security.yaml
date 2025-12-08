@@ -1,0 +1,37 @@
+security:
+  password_hashers:
+    Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface: "auto"
+
+  providers:
+    app_user_provider:
+      entity:
+        class: App\Entity\User
+        property: email
+        manager_name: default
+
+  firewalls:
+    dev:
+      pattern: ^/(_(profiler|wdt)|css|images|js)/
+      security: false
+
+    login:
+      pattern: ^/api/login
+      stateless: true
+
+    main:
+      stateless: false
+      pattern: ^/
+      provider: app_user_provider
+      custom_authenticators:
+        - App\Security\GoogleAuthenticator
+      entry_point: App\Security\GoogleAuthenticator
+
+      logout:
+        path: app_logout
+        target: /
+
+  access_control:
+    - { path: ^/login$, roles: IS_AUTHENTICATED_ANONYMOUSLY }
+    - { path: ^/serv, roles: [ROLE_USER, ROLE_ADMIN] }
+    - { path: ^/domain, roles: [ROLE_USER, ROLE_ADMIN] }
+    # - { path: ^/, roles: IS_AUTHENTICATED_ANONYMOUSLY }

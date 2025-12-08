@@ -1,0 +1,139 @@
+{% extends 'dashboard/layout.html.twig' %}
+
+{% block title %}Справочник: Нейросети (Neuro){% endblock %}
+
+{% block body %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>🧠 Справочник: Нейросети (Neuro)</h2>
+        <div>
+            <button id="add-row" class="btn btn-info text-white me-2">➕ Добавить</button>
+            <button id="save-table" class="btn btn-success">💾 Сохранить</button>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert d-none"></div>
+    <div id="neuro-table"></div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    const tableData = {{ table_json|raw }};
+
+    var table = new Tabulator("#neuro-table", {
+        data: tableData,
+        layout: "fitDataFill",
+        height: "80vh",
+        movableColumns: true,
+
+        // Подсветка новых строк
+        rowFormatter: function(row) {
+            if(!row.getData().id) {
+                row.getElement().classList.add("row-new");
+            }
+        },
+        
+        columns: [
+            {title:"ID", field:"id", width:70, frozen:true},
+            
+            // Название модели
+            {
+                title:"Модель (Model Name)", 
+                field:"model_name", 
+                editor:"input", 
+                width:400,
+                headerFilter:"input" // Поиск по названию
+            },
+
+            // Вкл/Выкл
+            {
+                title:"Вкл", 
+                field:"is_active", 
+                editor:true, 
+                formatter:"tickCross", 
+                hozAlign:"center", 
+                width:100,
+                editorParams:{
+                    tristate:false,
+                    indeterminateValue:null
+                }
+            },
+
+            // Удаление
+            {title:"Удалить", formatter:"buttonCross", width:100, align:"center", headerSort:false, cellClick:function(e, cell){
+                if(confirm("Удалить эту модель нейросети?")) {
+                    let id = cell.getRow().getData().id;
+                    if(id) {
+                         fetch('{{ path('api_neuro_delete') }}', {
+                            method: 'POST',
+                            body: JSON.stringify({id: id})
+                        })
+                        .then(res => res.json())
+                        .then(res => {
+                            if(res.status === 'success') {
+                                cell.getRow().delete();
+                            } else {
+                                alert("Ошибка: " + (res.message || "Не удалось удалить"));
+                            }
+                        });
+                    } else {
+                        cell.getRow().delete();
+                    }
+                }
+            }}
+        ],
+    });
+
+    // Кнопки
+    document.getElementById("add-row").addEventListener("click", function(){
+
+        const newRowData = {
+            model_name: "", 
+            is_active: true
+        };
+
+         table.addRow(newRowData).then(function(row){
+            // 1. Плавный скролл
+            table.scrollToRow(row, "top", true);
+            
+            // 2. Фокус в первую ячейку 
+            row.getCells()[1].edit(); 
+        });
+    });
+
+    document.getElementById("save-table").addEventListener("click", function(){
+        const btn = this;
+        const msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        btn.innerText = "Сохранение...";
+
+        fetch('{{ path('api_neuro_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(table.getData())
+        })
+        .then(res => res.json())
+        .then(res => {
+            msg.className = res.status === 'success' ? 'alert alert-success' : 'alert alert-danger';
+            msg.innerText = res.message;
+            msg.classList.remove('d-none');
+            setTimeout(() => msg.classList.add('d-none'), 3000);
+            
+            if(res.status === 'success') {
+                setTimeout(() => location.reload(), 1000);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            msg.className = 'alert alert-danger';
+            msg.innerText = 'Ошибка сохранения';
+            msg.classList.remove('d-none');
+        })
+        .finally(() => btn.disabled = false);
+    });
+});
+</script>
+{% endblock %}

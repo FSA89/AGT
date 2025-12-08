@@ -1,0 +1,39 @@
+{% import 'partials/_macros.twig' as macros %}
+<header class="header">
+    <div class="container">
+        <div class="header-inner">
+            <div class="header-item">
+                <a href="/" class="header-logo__link">
+                    <img src="/assets/img/logo/logo.svg" alt="Логотип" class="header-img">
+                </a>
+            </div>
+            {% if app.user and ('ROLE_USER' in app.user.roles or 'ROLE_ADMIN' in app.user.roles) %}
+                <div class="header-item">
+                    <div class="header-user">
+                        <div>Добро пожаловать, <strong>{{ app.user.email }}</strong> - <strong>{{ app.user.roles|map(role => macros.role_label(role))|join(', ') }}</strong></div>
+                        <a href="{{ path('app_logout') }}">Выйти</a>
+                    </div>
+                </div>
+                <div class="header-item">
+                    <nav id="top-menu" class="nav-menu">
+                        <ul>
+                            <li><a href="{{ path('app_generate') }}">Генерация текста</a></li>
+                        </ul>
+                    </nav>
+                </div>
+            {% else %}
+                <div class="header-item">
+                    <div class="google-link">
+                        <a href="{{ path('connect_google_start') }}">
+                            <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google"
+                                style="width:20px; vertical-align: middle; margin-right: 8px;">
+                            Войти через Google
+                        </a>
+                    </div>
+                </div>
+            {% endif %}
+
+            
+        </div>
+    </div>
+</header>

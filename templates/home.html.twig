@@ -1,0 +1,42 @@
+{% extends 'default/index.html.twig' %}
+{% import 'partials/_macros.twig' as macros %}
+
+{% block title %}Auto Generate Text{% endblock %}
+
+{% block head %}
+   
+{% endblock %}
+
+{% block body %}
+    <div class="content-page">
+        <div class="container">
+            <div id="preloader" class="preloader hidden">
+                <div class="preloader__spinner"></div>
+            </div>
+            <h1 class="tables-title">Автоматическая генерация текстов</h1>
+            
+            <div class="google-inner">
+                {% if app.user %}
+                    <div>Вы вошли как: <strong>{{ app.user.email }}</strong></div>
+                    <div>Роли пользователя: <strong>{{ app.user.roles|map(role => macros.role_label(role))|join(', ') }}</strong></div>
+                    <a href="{{ path('app_logout') }}">Выйти</a>
+                {% else %}
+                    <a href="{{ path('connect_google_start') }}">
+                        <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" style="width:20px; vertical-align: middle; margin-right: 8px;">
+                        Войти через Google
+                    </a>
+
+                    {% for message in app.flashes('error') %}
+                        <div class="alert alert-danger">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            </div>
+
+        </div>
+
+    </div>
+{% endblock %}
+
+{% block footer_script %}
+  
+{% endblock %}

@@ -1,0 +1,273 @@
+{% extends 'dashboard/layout.html.twig' %}
+
+{% block title %}Готовые Тексты (Articles){% endblock %}
+
+{% block body %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>📄 Готовые Тексты (Articles)</h2>
+        <div>
+            <button id="add-row" class="btn btn-info text-white me-2">➕ Добавить</button>
+            <button id="save-table" class="btn btn-success">💾 Сохранить</button>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert d-none"></div>
+    <div id="articles-table"></div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<style>
+    /* 1. Стиль для СВЕРНУТОГО вида */
+    .compact-view {
+        max-height: 40px;       
+        overflow: hidden;       
+        text-overflow: ellipsis;
+        white-space: nowrap;    
+        font-family: monospace; /* Шрифт как в коде */
+        color: #555;
+        font-size: 12px;
+        cursor: pointer;
+        padding-top: 4px;
+    }
+    
+    /* Иконка "код" перед текстом */
+    .compact-view::before {
+        content: "\f1c9"; /* FontAwesome icon */
+        font-family: "Font Awesome 6 Free"; 
+        font-weight: 900;
+        margin-right: 5px;
+        color: #0d6efd;
+    }
+
+    /* 2. Стиль для РЕДАКТОРА (Развернутый при клике) */
+    .tabulator-cell textarea {
+        min-height: 300px !important; 
+        min-width: 400px !important;  
+        font-family: monospace;
+        font-size: 13px;
+        line-height: 1.4;
+        background-color: #fff !important;
+        border: 2px solid #0d6efd !important;
+        padding: 10px;
+        z-index: 1000; /* Поверх таблицы */
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    const tableData = {{ articles_json|raw }};
+    const rawTasks = {{ dict_tasks|raw }};
+
+    // Хелпер для списка задач
+    function toOptions(dict) {
+        let opts = Object.keys(dict).map(key => ({
+            label: dict[key],
+            value: parseInt(key)
+        }));
+        opts.unshift({label: "", value: null});
+        return opts;
+    }
+    const optionsTasks = toOptions(rawTasks);
+
+    // Статусы
+    const dictStatus = {
+        "ready": "Готово",
+        "publish": "Разместить",
+        "error": "Ошибка"
+    };
+    const optionsStatus = Object.keys(dictStatus).map(k => ({label: dictStatus[k], value: k}));
+
+    // --- ФОРМАТТЕР ДЛЯ СЖАТИЯ ТЕКСТА ---
+    const compactFormatter = function(cell) {
+        let val = cell.getValue();
+        if(!val) return "";
+        // Экранируем HTML теги, чтобы не ломать верстку таблицы
+        let text = val.toString()
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        
+        return `<div class="compact-view" title="Нажмите, чтобы редактировать">${text}</div>`;
+    };
+
+    var table = new Tabulator("#articles-table", {
+        data: tableData,
+        layout: "fitDataFill",
+        height: "80vh",
+        movableColumns: true,
+        pagination: "local",
+        paginationSize: 20,
+
+         // Подсветка новых строк
+        rowFormatter: function(row) {
+            if(!row.getData().id) {
+                row.getElement().classList.add("row-new");
+            }
+        },
+        
+        columns: [
+            {title:"ID", field:"id", width:70, frozen:true},
+            
+            // Номер (42(1))
+            {title:"№", field:"task_custom_id", editor:"input", width:80, frozen:true},
+
+            // Связь с Задачей (с Фильтром)
+            {
+                title: "Задача (Task)", 
+                field: "task_id", 
+                width: 150,
+                headerFilter: "input",
+                editor: "list", 
+                editorParams: {
+                    values: optionsTasks,
+                    autocomplete: true,
+                    clearable: true,
+                    listOnEmpty: true
+                }, 
+                formatter: "lookup", 
+                formatterParams: rawTasks
+            },
+
+            // Домен (с Фильтром)
+            {
+                title:"URL Домена", 
+                field:"domain_url", 
+                editor:"input", 
+                width:200,
+                headerFilter: "input"
+            },
+
+            // Query (с Фильтром, Read Only из задачи)
+            {
+                title:"Query (Запрос)", 
+                field:"task_query", 
+                width:200,
+                headerFilter:"input" 
+            },
+
+          
+            
+            // Title
+            {
+                title:"Title", 
+                field:"title", 
+                width:250,
+                formatter: compactFormatter, 
+                editor:"textarea"            
+            },
+            
+            // Description
+            {
+                title:"Description", 
+                field:"description", 
+                width:250,
+                formatter: compactFormatter,
+                editor:"textarea"
+            },
+
+            // HTML Контент
+            {
+                title:"HTML Контент", 
+                field:"content", 
+                width: 400,
+                formatter: compactFormatter, 
+                editor:"textarea"
+            },
+
+            // Оценка
+            {title:"Оценка", field:"rating", editor:"number", width:150},
+
+            // Статус
+            {
+                title: "Статус", 
+                field: "status", 
+                width: 120,
+                editor: "list", 
+                editorParams: { values: optionsStatus, clearable: false },
+                formatter: function(cell){
+                    const val = cell.getValue();
+                    const label = dictStatus[val] || val;
+                    let color = val === 'ready' ? 'green' : (val === 'error' ? 'red' : 'blue');
+                    return `<span style="color:${color}; font-weight:bold;">${label}</span>`;
+                }
+            },
+
+              // Схема Нейросети (Snapshot)
+            {
+                title:"Схема (Snapshot)", 
+                field:"scheme_neuro_snapshot", 
+                width:250,
+                formatter: compactFormatter
+                //editor: "textarea"
+            },
+            
+            // Удаление
+            {formatter:"buttonCross", width:50, align:"center", headerSort:false, cellClick:function(e, cell){
+                if(confirm("Удалить статью?")) {
+                    let id = cell.getRow().getData().id;
+                    if(id) {
+                         fetch('{{ path('api_articles_delete') }}', {
+                            method: 'POST',
+                            body: JSON.stringify({id: id})
+                        }).then(() => cell.getRow().delete());
+                    } else {
+                        cell.getRow().delete();
+                    }
+                }
+            }}
+        ],
+    });
+
+    // --- Кнопки ---
+    document.getElementById("add-row").addEventListener("click", function(){
+
+          // Данные новой строки
+        const newRowData = {
+           status: 'ready', 
+           rating: 0
+        };
+
+        // Добавляем строку и скроллим к ней
+        table.addRow(newRowData).then(function(row){
+            // 1. Плавный скролл
+            table.scrollToRow(row, "top", true);
+            
+            // 2. Фокус в первую ячейку 
+            row.getCells()[1].edit(); 
+        });
+    });
+
+    document.getElementById("save-table").addEventListener("click", function(){
+        const btn = this;
+        const msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        btn.innerText = "Сохранение...";
+
+        fetch('{{ path('api_articles_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(table.getData())
+        })
+        .then(res => res.json())
+        .then(res => {
+            msg.className = res.status === 'success' ? 'alert alert-success' : 'alert alert-danger';
+            msg.innerText = res.message;
+            msg.classList.remove('d-none');
+            setTimeout(() => msg.classList.add('d-none'), 3000);
+            if(res.status === 'success') setTimeout(() => location.reload(), 1000);
+        })
+        .catch(err => {
+            console.error(err);
+            msg.className = 'alert alert-danger';
+            msg.innerText = 'Ошибка сохранения';
+            msg.classList.remove('d-none');
+        })
+        .finally(() => btn.disabled = false);
+    });
+});
+</script>
+{% endblock %}

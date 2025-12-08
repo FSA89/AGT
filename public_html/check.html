@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Request App</title>
+    <script>
+        // Функция для отправки POST запроса на получение токена
+        async function generateToken() {
+            try {
+                const response = await fetch('https://qwe.datario.ru/api/generate-token', {
+                    method: 'POST', // или 'GET', если API это поддерживает
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ user_id: '12345' }) // Передайте необходимые данные в теле запроса
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to generate token');
+                }
+
+                const data = await response.json(); // Предположим, что сервер возвращает JSON с токеном
+                const token = data.token; // Убедитесь, что сервер возвращает токен в ключе 'token'
+                console.log(token);
+                // Теперь отправляем запрос с полученным токеном в заголовке Authorization
+                await checkToken(token);
+            } catch (error) {
+                console.error('Error during token generation:', error);
+                alert('Error during token generation');
+            }
+        }
+
+        // Функция для отправки GET запроса на проверку токена
+        async function checkToken(token) {
+            try {
+                const response = await fetch('https://qwe.datario.ru/api/check-token', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`  // Используем токен в заголовке Authorization
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to check token');
+                }
+
+                const data = await response.json();  // Ожидаем JSON в ответе
+                console.log('Token check response:', data);
+
+                // Показать ответ на странице
+                document.getElementById('response').textContent = JSON.stringify(data, null, 2);
+
+            } catch (error) {
+                console.error('Error during token check:', error);
+                alert('Error during token check');
+            }
+        }
+
+        // Инициализация процесса
+        document.addEventListener('DOMContentLoaded', function () {
+            generateToken(); // Автоматически генерируем и проверяем токен при загрузке страницы
+        });
+    </script>
+</head>
+<body>
+<h1>Token Check Application</h1>
+<div id="response">Ответ от сервера будет здесь...</div>
+</body>
+</html>

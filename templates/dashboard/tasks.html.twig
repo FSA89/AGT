@@ -1,0 +1,355 @@
+{% extends 'dashboard/layout.html.twig' %}
+
+{% block title %}Рабочие Задачи (Tasks){% endblock %}
+
+{% block body %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>🎯 Управление Задачами (Tasks)</h2>
+        <div>
+            {# СПИННЕР #}
+            <span id="parser-loader" class="d-none me-2 text-primary fw-bold">
+                <i class="fas fa-spinner fa-spin"></i> Парсинг...
+            </span>
+
+            <button id="btn-parser" class="btn btn-warning text-dark me-2" title="Запустить парсинг для всех задач с URL">🚀 Запустить Парсер</button>
+            
+            <button id="add-row" class="btn btn-info text-white me-2">➕ Добавить строку</button>
+            <button id="save-table" class="btn btn-success">💾 Сохранить изменения</button>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert d-none"></div>
+
+    <div id="tasks-table"></div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<style>
+    .compact-view {
+        max-height: 40px;       
+        overflow: hidden;       
+        text-overflow: ellipsis;
+        white-space: nowrap;    
+        font-family: monospace; 
+        color: #555;
+        font-size: 12px;
+        cursor: pointer;
+        padding-top: 4px;
+    }
+    .compact-view::before {
+        content: "\f0c9"; 
+        font-family: "Font Awesome 6 Free"; 
+        font-weight: 900;
+        margin-right: 5px;
+        color: #0d6efd;
+    }
+    .tabulator-cell textarea {
+        min-height: 300px !important; 
+        min-width: 400px !important;  
+        font-family: monospace;
+        font-size: 13px;
+        line-height: 1.4;
+        background-color: #fff !important;
+        border: 2px solid #0d6efd !important;
+        padding: 10px;
+        z-index: 1000; 
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    .row-new {
+        border: 2px solid #0dcaf0 !important; 
+        background-color: #f2fcff !important; 
+        box-shadow: inset 0 0 5px rgba(13, 202, 240, 0.2); 
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    const tableData = {{ tasks_json|raw }};
+    const rawPageTypes = {{ dict_page_types|raw }};
+    const rawHreflangs = {{ dict_hreflangs|raw }};
+    const rawSchemes   = {{ dict_schemes|raw }};
+    const statusUrlPattern = "{{ path('api_task_get_status', {'id': 999999}) }}";
+
+    function toLookup(list) {
+        let map = {};
+        list.forEach(item => map[item.id] = item.name);
+        return map;
+    }
+    function toOptionsActive(list) {
+        let opts = list.filter(item => item.active).map(item => ({label: item.name, value: item.id}));
+        opts.unshift({label: "", value: null}); 
+        return opts;
+    }
+
+    const lookupPageTypes = toLookup(rawPageTypes);
+    const optionsPageTypes = toOptionsActive(rawPageTypes);
+    const lookupHreflangs = toLookup(rawHreflangs);
+    const optionsHreflangs = toOptionsActive(rawHreflangs);
+    const lookupSchemes = toLookup(rawSchemes);
+    const optionsSchemes = toOptionsActive(rawSchemes);
+
+    const dictStatus = { "generate": "Сгенерировать", "processing": "В работе", "done": "Готово", "error": "Ошибка" };
+    const optionsStatus = Object.keys(dictStatus).map(k => ({label: dictStatus[k], value: k}));
+
+    // --- ПОЛЛИНГ ---
+    const activePolls = {}; 
+    const parserLoader = document.getElementById('parser-loader');
+
+    function updateLoaderVisibility() {
+        if (Object.keys(activePolls).length > 0) {
+            parserLoader.classList.remove('d-none');
+        } else {
+            parserLoader.classList.add('d-none');
+        }
+    }
+
+    function startPolling(row) {
+        let id = row.getData().id;
+        if (!id || activePolls[id]) return; 
+
+        activePolls[id] = true;
+        updateLoaderVisibility();
+
+        let url = statusUrlPattern.replace('999999', id);
+
+        let interval = setInterval(() => {
+            fetch(url)
+                .then(res => res.json())
+                .then(data => {
+                    if(data.status === 'deleted') {
+                        clearInterval(interval); delete activePolls[id]; updateLoaderVisibility(); return;
+                    }
+
+                    // Обновляем данные в таблице
+                    row.update({
+                        status: data.status, // Если он изменился (не должен при парсинге, но на всякий случай)
+                        competitor_structures: data.competitor_structures
+                    });
+
+                    // Проверяем, пришел ли результат
+                    let struct = data.competitor_structures || "";
+                    // Если структура больше не "пустая" и не содержит слово "Parsing..."
+                    // (мы сами его туда пишем ниже, поэтому проверяем реальный текст)
+                    if (struct.length > 5 && !struct.includes('Parsing...')) {
+                        clearInterval(interval); 
+                        delete activePolls[id]; 
+                        updateLoaderVisibility();
+
+                        row.getElement().style.transition = "background-color 0.5s";
+                        row.getElement().style.backgroundColor = "#d1e7dd";
+                        setTimeout(() => row.getElement().style.backgroundColor = "", 1000);
+                    }
+                })
+                .catch(err => { 
+                    console.error("Poll error:", err); 
+                    clearInterval(interval); delete activePolls[id]; updateLoaderVisibility();
+                });
+        }, 3000);
+    }
+
+    // --- ЗАПУСК ПАРСЕРА ---
+    function runParser(cellOrRow, isBulk = false) {
+        let updates = [];
+        let rowsToPoll = [];
+
+        if (isBulk) {
+            const rows = table.getRows();
+            rows.forEach(row => {
+                let data = row.getData();
+                // URL есть, Структуры нет, ID есть
+                if (data.competitor_urls && !data.competitor_structures && data.id) {
+                    let rowData = row.getData();
+                    rowData['_command'] = 'parse_structure'; // СПЕЦ. ПОЛЕ
+                    
+                    // Визуально ставим "Parsing..." в колонку структуры
+                    row.update({competitor_structures: "⏳ Parsing..."});
+                    
+                    updates.push(rowData);
+                    rowsToPoll.push(row);
+                }
+            });
+        } else {
+            let row = cellOrRow.getRow();
+            let rowData = row.getData();
+            rowData['_command'] = 'parse_structure'; // СПЕЦ. ПОЛЕ
+            
+            row.update({competitor_structures: "⏳ Parsing..."});
+            
+            updates.push(rowData);
+            rowsToPoll.push(row);
+        }
+
+        if (updates.length === 0) {
+            if (isBulk) alert("Нет задач для парсинга.");
+            return;
+        }
+
+        document.body.style.cursor = 'wait';
+        fetch('{{ path('api_tasks_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(updates)
+        })
+        .then(res => res.json())
+        .then(res => {
+            if(res.status === 'success') {
+                rowsToPoll.forEach(r => startPolling(r));
+            } else {
+                alert('Ошибка: ' + res.message);
+            }
+        })
+        .catch(err => { console.error(err); alert('Ошибка соединения'); })
+        .finally(() => { document.body.style.cursor = 'default'; });
+    }
+
+
+    // --- ТАБЛИЦА ---
+    const compactFormatter = function(cell) {
+        let val = cell.getValue();
+        if(!val) return "";
+        let text = val.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `<div class="compact-view" title="Нажмите, чтобы увидеть структуру">${text}</div>`;
+    };
+
+    const statusFormatter = function(cell){
+        const val = cell.getValue();
+        const label = dictStatus[val] || val;
+        let color = 'black';
+        if(val === 'done') color = 'green';
+        if(val === 'processing') color = 'orange';
+        if(val === 'error') color = 'red';
+        return `<span style="color:${color}; font-weight:bold;">${label}</span>`;
+    };
+
+    const structureMenu = [
+        {
+            label: "🚀 <b>Спарсить структуру</b>", 
+            action: function(e, cell){ 
+                runParser(cell, false); 
+            }
+        },
+        {separator:true},
+        { label: "❌ Очистить поле", action: function(e, cell){ cell.setValue(""); } }
+    ];
+
+    var table = new Tabulator("#tasks-table", {
+        data: tableData,
+        layout: "fitDataFill", 
+        height: "85vh",        
+        movableColumns: true,
+        pagination: "local",
+        paginationSize: 50,
+        
+        rowFormatter: function(row) {
+            if(!row.getData().id) row.getElement().classList.add("row-new");
+        },
+
+        dataLoaded: function(data) {
+            data.forEach(row => {
+                // Возобновляем поллинг, если структура "висит"
+                if (row.competitor_structures && row.competitor_structures.includes('Parsing')) {
+                    let tableRow = table.getRow(row.id);
+                    if(tableRow) startPolling(tableRow);
+                }
+            });
+        },
+        
+        columns: [
+            {title:"ID", field:"id", width:70, headerFilter:"input", frozen:true},
+            {title:"Главный ключ", field:"main_keyword", editor:"input", headerFilter:"input", width:200, frozen:true},
+            {
+                title: "Тип страницы", field: "page_type_id", width: 150,
+                editor: "list", editorParams: { values: optionsPageTypes, autocomplete: false, clearable: true }, 
+                formatter: "lookup", formatterParams: lookupPageTypes 
+            },
+            {title:"Ключи", field:"keywords", editor:"textarea", formatter:"textarea", width:250},
+            {title:"URL Конкурентов", field:"competitor_urls", editor:"textarea", width:250},
+            
+            // СТРУКТУРА
+            {
+                title: "Структура конкурентов", field: "competitor_structures", width: 300,
+                formatter: compactFormatter, editor: "textarea", clickMenu: structureMenu
+            },
+
+            {title:"Кол-во", field:"count", editor:"number", width:90},
+            {title:"Готово", field:"count_done", width:90},
+            {
+                title: "Статус", field: "status", width: 130,
+                editor: "list", editorParams: { values: optionsStatus, clearable: false }, formatter: statusFormatter
+            },
+            {title:"Query ID", field:"query", editor:"input", width:150},
+            {
+                title: "Lang", field: "hreflang_id", width: 100,
+                editor: "list", editorParams: { values: optionsHreflangs, autocomplete: true, listOnEmpty: true, clearable: true }, 
+                formatter: "lookup", formatterParams: lookupHreflangs
+            },
+            {
+                title: "Схема Нейро", field: "scheme_neuro_id", width: 250,
+                editor: "list", editorParams: { values: optionsSchemes, autocomplete: false, clearable: true }, 
+                formatter: "lookup", formatterParams: lookupSchemes
+            },
+            {formatter:"buttonCross", width:50, align:"center", headerSort:false, frozen:false, cellClick:function(e, cell){
+                if(confirm("Удалить эту задачу?")) {
+                    let id = cell.getRow().getData().id;
+                    if(id) {
+                         fetch('{{ path('api_tasks_delete') }}', {
+                            method: 'POST',
+                            body: JSON.stringify({id: id})
+                        }).then(() => cell.getRow().delete());
+                    } else {
+                        cell.getRow().delete();
+                    }
+                }
+            }}
+        ],
+    });
+
+    // --- КНОПКИ ---
+    document.getElementById("add-row").addEventListener("click", function(){
+        const newRowData = { status: 'generate', count: 1 };
+        table.addRow(newRowData).then(function(row){
+            table.scrollToRow(row, "top", true);
+            row.getElement().classList.add("row-new");
+        });
+    });
+
+    document.getElementById("btn-parser").addEventListener("click", function(){
+        runParser(null, true);
+    });
+
+    document.getElementById("save-table").addEventListener("click", function(){
+        const btn = this;
+        const msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        btn.innerText = "Сохранение...";
+
+        fetch('{{ path('api_tasks_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(table.getData())
+        })
+        .then(res => res.json())
+        .then(res => {
+            msg.className = res.status === 'success' ? 'alert alert-success' : 'alert alert-danger';
+            msg.innerText = res.message;
+            msg.classList.remove('d-none');
+            setTimeout(() => msg.classList.add('d-none'), 3000);
+            if(res.status === 'success') setTimeout(() => location.reload(), 1000);
+        })
+        .catch(err => {
+            console.error(err);
+            msg.className = 'alert alert-danger';
+            msg.innerText = 'Ошибка сохранения';
+            msg.classList.remove('d-none');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerText = "💾 Сохранить изменения";
+        });
+    });
+});
+</script>
+{% endblock %}

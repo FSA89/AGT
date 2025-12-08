@@ -1,0 +1,38 @@
+# config/services.yaml
+
+parameters:
+    # ... твои параметры ...
+    registrar.namesilo_key: '%env(NAMESILO_API_KEY)%'
+    registrar.dynadot_key: '%env(DYNADOT_API_KEY)%'
+    registrar.dynadot_sandbox_key: '%env(DYNADOT_SANDBOX_KEY)%'
+    registrar.dynadot_env: '%env(DYNADOT_ENV)%'
+    sftp.host: '%env(SFTP_HOST)%'
+    sftp.user: '%env(SFTP_USER)%'
+    sftp.pass: '%env(SFTP_PASS)%'
+    jenkins.url: '%env(JENKINS_URL)%'
+    jenkins.user: '%env(JENKINS_USER)%'
+    jenkins.token: '%env(JENKINS_TOKEN)%'
+
+services:
+    # configuration for services in *this* file
+    _defaults:
+        autowire: true      
+        autoconfigure: true 
+        
+        # --- ВАЖНО: bind должен быть ВНУТРИ _defaults (отступ 4 пробела) ---
+        bind:
+            # Имя аргумента в конструкторе: Значение из env
+            string $externalApiKey: '%env(string:EXTERNAL_API_KEY)%'
+
+    # makes classes in src/ available to be used as services
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/DependencyInjection/'
+            - '../src/Entity/'
+            - '../src/Kernel.php'
+
+    # add more service definitions when explicit configuration is needed
+    App\Security\GoogleAuthenticator:
+        arguments:
+            $em: '@doctrine.orm.default_entity_manager'

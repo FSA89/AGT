@@ -1,0 +1,197 @@
+{% extends 'dashboard/layout.html.twig' %}
+
+{% block title %}Справочник: Шаблоны (Templates){% endblock %}
+
+{% block body %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>🎨 Справочник: Шаблоны (Templates)</h2>
+        <div>
+            <button id="add-row" class="btn btn-info text-white me-2">➕ Добавить</button>
+            <button id="save-table" class="btn btn-success">💾 Сохранить</button>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert d-none"></div>
+    <div id="template-table"></div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<style>
+    /* 1. Стиль для РЕЖИМА ПРОСМОТРА (Свернутый) */
+    .compact-view {
+        max-height: 40px;       /* Ограничиваем высоту ~2 строки */
+        overflow: hidden;       /* Обрезаем лишнее */
+        text-overflow: ellipsis;
+        white-space: nowrap;    /* Текст в одну строку (можно pre-wrap, если нужно 2 строки) */
+        font-family: monospace; /* Моноширинный шрифт для кода */
+        color: #555;
+        font-size: 12px;
+        cursor: pointer;        /* Показываем, что можно кликнуть */
+        padding-top: 4px;
+    }
+    
+    /* Добавим иконку "глаз", чтобы было понятно, что там скрытый код */
+    .compact-view::before {
+        content: "\f1c9"; /* Код иконки File Code из FontAwesome */
+        font-family: "Font Awesome 6 Free"; 
+        font-weight: 900;
+        margin-right: 5px;
+        color: #0d6efd;
+    }
+
+    /* 2. Стиль для РЕЖИМА РЕДАКТИРОВАНИЯ (Развернутый) */
+    /* Когда кликаешь, открывается textarea. Делаем её большой. */
+    .tabulator-cell textarea {
+        min-height: 400px !important; /* Большая высота при клике */
+        font-family: monospace;
+        font-size: 13px;
+        line-height: 1.4;
+        background-color: #fff !important;
+        border: 2px solid #0d6efd !important;
+        padding: 10px;
+        z-index: 1000; /* Поверх всего */
+    }
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    const tableData = {{ table_json|raw }};
+
+    // Форматтер, который прячет большой текст в маленький div
+    const compactFormatter = function(cell) {
+        let val = cell.getValue();
+        if(!val) return "";
+        // Экранируем HTML теги, если они есть, чтобы не ломали верстку
+        let text = val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `<div class="compact-view" title="Нажмите, чтобы развернуть">${text}</div>`;
+    };
+
+    var table = new Tabulator("#template-table", {
+        data: tableData,
+        layout: "fitDataFill",
+        height: "80vh",
+        movableColumns: true,
+
+         // Подсветка новых строк
+        rowFormatter: function(row) {
+            if(!row.getData().id) {
+                row.getElement().classList.add("row-new");
+            }
+        },
+        
+        columns: [
+            {title:"ID", field:"id", width:100, frozen:true},
+            
+            // Название шаблона
+            {title:"Название (Name)", field:"template_name", editor:"input", width:200, frozen:true},
+            
+            // Сервер
+            {title:"Сервер (Server)", field:"server_name", editor:"input", width:120},
+
+            // Кнопка (URL редиректа)
+            {title:"URL Кнопки (Button)", field:"button_url", editor:"input", width:200},
+
+            // JSON Конфиг (Сжимающийся)
+            {
+                title:"JSON Конфиг (Structure)", 
+                field:"json_template", 
+                width: 500, // Ширина колонки
+                
+                formatter: compactFormatter, // Используем наш сжиматель
+                
+                editor: "textarea", // При клике открывается большая textarea
+                headerSort: false
+            },
+
+            // Вкл/Выкл
+            {
+                title:"Вкл", 
+                field:"is_active", 
+                editor:true, 
+                formatter:"tickCross", 
+                hozAlign:"center", 
+                width:100,
+                editorParams:{
+                    tristate:false,
+                    indeterminateValue:null
+                }
+            },
+
+            // Удаление
+            {title:"Удалить", formatter:"buttonCross", width:100, align:"center", headerSort:false, cellClick:function(e, cell){
+                if(confirm("Удалить этот шаблон?")) {
+                    let id = cell.getRow().getData().id;
+                    if(id) {
+                         fetch('{{ path('api_template_delete') }}', {
+                            method: 'POST',
+                            body: JSON.stringify({id: id})
+                        })
+                        .then(res => res.json())
+                        .then(res => {
+                            if(res.status === 'success') {
+                                cell.getRow().delete();
+                            } else {
+                                alert("Ошибка: " + (res.message || "Не удалось удалить"));
+                            }
+                        });
+                    } else {
+                        cell.getRow().delete();
+                    }
+                }
+            }}
+        ],
+    });
+
+    // Кнопки
+    document.getElementById("add-row").addEventListener("click", function(){
+
+        const newRowData = {
+            template_name: "New Template",
+            json_template: "[\n  {\"type\": \"logo\", \"position\": \"header-1\"}\n]",
+            is_active: true
+        };
+
+         table.addRow(newRowData).then(function(row){
+            // 1. Плавный скролл
+            table.scrollToRow(row, "top", true);
+            
+            // 2. Фокус в первую ячейку 
+            row.getCells()[1].edit(); 
+        });
+    });
+
+    document.getElementById("save-table").addEventListener("click", function(){
+        const btn = this;
+        const msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        btn.innerText = "Сохранение...";
+
+        fetch('{{ path('api_template_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(table.getData())
+        })
+        .then(res => res.json())
+        .then(res => {
+            msg.className = res.status === 'success' ? 'alert alert-success' : 'alert alert-danger';
+            msg.innerText = res.message;
+            msg.classList.remove('d-none');
+            setTimeout(() => msg.classList.add('d-none'), 3000);
+            
+            if(res.status === 'success') {
+                setTimeout(() => location.reload(), 1000);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            msg.className = 'alert alert-danger';
+            msg.innerText = 'Ошибка сохранения';
+            msg.classList.remove('d-none');
+        })
+        .finally(() => btn.disabled = false);
+    });
+});
+</script>
+{% endblock %}

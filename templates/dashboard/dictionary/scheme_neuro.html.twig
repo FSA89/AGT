@@ -1,0 +1,290 @@
+{% extends 'dashboard/layout.html.twig' %}
+
+{% block title %}Справочник: Схемы Нейро (Scheme){% endblock %}
+
+{% block body %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>🔗 Справочник: Схемы Нейро (Schemes)</h2>
+        <div>
+            <button id="add-row" class="btn btn-info text-white me-2">➕ Добавить</button>
+            <button id="save-table" class="btn btn-success">💾 Сохранить</button>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert d-none"></div>
+    <div id="scheme-table"></div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<style>
+    /* Теги в таблице (режим просмотра) */
+    .neuro-tag {
+        display: inline-block;
+        background-color: #e9ecef;
+        color: #495057;
+        padding: 2px 6px;
+        margin: 1px;
+        border-radius: 4px;
+        font-size: 0.85em;
+        border: 1px solid #ced4da;
+    }
+    .neuro-tag i {
+        font-size: 0.8em;
+        margin-right: 3px;
+        color: #0d6efd;
+    }
+    
+    /* Поля, которые вычисляются авто, сделаем чуть бледнее (ReadOnly) */
+    .tabulator-cell[tabulator-field="scheme_neuro"],
+    .tabulator-cell[tabulator-field="scheme_neuro_full"] {
+        background-color: #f8f9fa;
+        color: #666;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    // Проверка наличия библиотеки
+    if (typeof Tabulator === 'undefined') {
+        alert('Ошибка: Библиотека Tabulator не загружена. Проверьте layout.html.twig или интернет-соединение.');
+        return;
+    }
+
+    const tableData = {{ table_json|raw }};
+    const rawNeuro  = {{ dict_neuro|raw }}; 
+
+    // --- 1. СПИСКИ ---
+    function createOptions(dict) {
+        let opts = Object.keys(dict).map(key => ({
+            label: dict[key], 
+            value: parseInt(key)
+        }));
+        opts.unshift({label: "--- Не выбрано ---", value: null});
+        return opts;
+    }
+    const optionsSingle = createOptions(rawNeuro);
+
+    // --- 2. ФОРМАТТЕРЫ ---
+    
+    // Рисует теги из строки "1+2"
+    const chainFormatter = function(cell) {
+        let val = cell.getValue();
+        if (!val) return "";
+        // Разбиваем строку "1+5" по плюсу
+        let ids = val.toString().split('+');
+        let html = "";
+        ids.forEach(id => {
+            let numericId = parseInt(id);
+            let name = rawNeuro[numericId];
+            if(name) { 
+                html += `<span class="neuro-tag"><i class="fas fa-robot"></i>${name}</span>`;
+            }
+        });
+        return html;
+    };
+
+    // Показывает имя вместо ID
+    const lookupFormatter = function(cell) {
+        let val = cell.getValue();
+        if(!val) return "";
+        return rawNeuro[val] || val;
+    };
+
+    // --- 3. ЛОГИКА ПЕРЕСЧЕТА (АВТОЗАПОЛНЕНИЕ) ---
+    function recalculateSchemes(row) {
+        const data = row.getData();
+        
+        // Вспомогательная функция: собирает массив ID из списка полей
+        const collectIds = (fields) => {
+            let ids = [];
+            fields.forEach(field => {
+                let val = data[field];
+                if (val && val > 0) { // Если ID выбран
+                    ids.push(val);
+                }
+            });
+            return ids.join('+'); // Склеиваем через плюс
+        };
+
+        // 1. Короткая схема (Название): Writer + Text Corrector
+        const shortScheme = collectIds(['writer_id', 'text_corrector_id']);
+        
+        // 2. Полная схема (Logic): Все 5 полей по порядку
+        const fullScheme = collectIds([
+            'structure_analyzer_id', 
+            'meta_header_generator_id', 
+            'writer_id', 
+            'meta_corrector_id', 
+            'text_corrector_id'
+        ]);
+
+        // Обновляем строку (без перезагрузки, визуально)
+        row.update({
+            scheme_neuro: shortScheme,
+            scheme_neuro_full: fullScheme
+        });
+    }
+
+    // Настройки для одиночных редакторов с триггером пересчета
+    const editorParamsSingle = {
+        values: optionsSingle,
+        autocomplete: true,     
+        listOnEmpty: true,
+        clearable: true
+    };
+
+    // Функция обновления при редактировании
+    const onCellEdited = function(cell) {
+        recalculateSchemes(cell.getRow());
+    };
+
+
+    // --- 4. ТАБЛИЦА ---
+    var table = new Tabulator("#scheme-table", {
+        data: tableData,
+        layout: "fitDataFill",
+        height: "80vh",
+        movableColumns: true,
+
+         // Подсветка новых строк
+        rowFormatter: function(row) {
+            if(!row.getData().id) {
+                row.getElement().classList.add("row-new");
+            }
+        },
+        
+        columns: [
+            {title:"ID", field:"id", width:50, frozen:true},
+            
+            // --- АВТОМАТИЧЕСКИЕ ПОЛЯ (READ ONLY) ---
+            {
+                title:"Цепочка (Writer + Corrector)", 
+                field:"scheme_neuro", 
+                width:300, 
+                frozen:true,
+                formatter: chainFormatter, // Только форматтер, БЕЗ редактора
+            },
+            {
+                title:"Полная цепочка (All 5)", 
+                field:"scheme_neuro_full", 
+                width:400,
+                formatter: chainFormatter, // Только форматтер
+            },
+
+            // --- РЕДАКТИРУЕМЫЕ ПОЛЯ ---
+            { 
+                title:"Structure Analyzer", field:"structure_analyzer_id", width:200, 
+                formatter: lookupFormatter, editor:"list", editorParams: editorParamsSingle,
+                cellEdited: onCellEdited 
+            },
+            { 
+                title:"Header Generator", field:"meta_header_generator_id", width:200, 
+                formatter: lookupFormatter, editor:"list", editorParams: editorParamsSingle,
+                cellEdited: onCellEdited 
+            },
+            { 
+                title:"Writer (Писатель)", field:"writer_id", width:200, 
+                formatter: lookupFormatter, editor:"list", editorParams: editorParamsSingle,
+                cellEdited: onCellEdited 
+            },
+            { 
+                title:"Meta Corrector", field:"meta_corrector_id", width:200, 
+                formatter: lookupFormatter, editor:"list", editorParams: editorParamsSingle,
+                cellEdited: onCellEdited 
+            },
+            { 
+                title:"Text Corrector", field:"text_corrector_id", width:200, 
+                formatter: lookupFormatter, editor:"list", editorParams: editorParamsSingle,
+                cellEdited: onCellEdited 
+            },
+
+            // Вкл/Выкл
+            {
+                title:"Вкл", 
+                field:"is_active", 
+                editor:true, 
+                formatter:"tickCross", 
+                hozAlign:"center", 
+                width:100,
+                editorParams:{
+                    tristate:false,
+                    indeterminateValue:null
+                }
+            },
+
+            // Удаление
+            {title:"Удалить", formatter:"buttonCross", width:100, align:"center", headerSort:false, cellClick:function(e, cell){
+                if(confirm("Удалить эту схему?")) {
+                    let id = cell.getRow().getData().id;
+                    if(id) {
+                         fetch('{{ path('api_scheme_delete') }}', {
+                            method: 'POST',
+                            body: JSON.stringify({id: id})
+                        }).then(() => cell.getRow().delete());
+                    } else {
+                        cell.getRow().delete();
+                    }
+                }
+            }}
+        ],
+    });
+
+    // --- 5. КНОПКИ ---
+    document.getElementById("add-row").addEventListener("click", function(){
+
+         const newRowData = {
+             scheme_neuro: "",       
+            scheme_neuro_full: "",  
+            structure_analyzer_id: null,
+            meta_header_generator_id: null,
+            writer_id: null,
+            meta_corrector_id: null,
+            text_corrector_id: null,
+            is_active: true
+        };
+
+         table.addRow(newRowData).then(function(row){
+            // 1. Плавный скролл
+            table.scrollToRow(row, "top", true);
+            
+            // 2. Фокус в первую ячейку 
+            row.getCells()[1].edit(); 
+        });
+    });
+
+    document.getElementById("save-table").addEventListener("click", function(){
+        const btn = this;
+        const msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        btn.innerText = "Сохранение...";
+
+        fetch('{{ path('api_scheme_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(table.getData())
+        })
+        .then(res => res.json())
+        .then(res => {
+            msg.className = res.status === 'success' ? 'alert alert-success' : 'alert alert-danger';
+            msg.innerText = res.message;
+            msg.classList.remove('d-none');
+            setTimeout(() => msg.classList.add('d-none'), 3000);
+            
+            if(res.status === 'success') {
+                setTimeout(() => location.reload(), 1000);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            msg.className = 'alert alert-danger';
+            msg.innerText = 'Ошибка сохранения';
+            msg.classList.remove('d-none');
+        })
+        .finally(() => btn.disabled = false);
+    });
+});
+</script>
+{% endblock %}

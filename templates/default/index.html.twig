@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %} {% endblock %}</title>
+
+    <link rel="icon" type="image/png" href="/assets/img/favicon/favicon-96x96.png" sizes="96x96">
+    <link rel="icon" type="image/svg+xml" href="/assets/img/favicon/favicon.svg">
+    <link rel="shortcut icon" href="/assets/img/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/img/favicon/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-title" content="ant-team-agt">
+    {# <link rel="manifest" href="{{ asset('site.webmanifest') }}"> #}
+    
+    <link href="/assets/styles/mobile.css" rel="stylesheet">
+    <link href="/assets/styles/reset.css" rel="stylesheet">
+    <link href="/assets/styles/style.css" rel="stylesheet">
+    <link href="/assets/styles/chart.css" rel="stylesheet"/>
+    <link href="/assets/styles/app.css" rel="stylesheet"/>
+
+
+    {% block head %}
+
+    {% endblock %}
+
+    
+</head>
+<body>
+    <div class="wrapper">
+        {% block header %}
+            {% include 'partials/header.html.twig' %}
+        {% endblock %}
+        <main class="main">
+            {% block body %}
+                <!-- Контент страницы будет вставляться сюда -->
+            {% endblock %}
+        </main>
+        {% block footer %}
+            {% include 'partials/footer.html.twig' %}
+        {% endblock %}
+    </div>
+
+    {% block footer_script %}
+        
+    {% endblock %}
+
+    <script type="module" src="/assets/js/app.js"></script>
+</body>
+</html>
+
+
+
+

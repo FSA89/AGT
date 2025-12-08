@@ -1,0 +1,38 @@
+###> symfony/framework-bundle ###
+/.env.local
+/.env.local.php
+/.env.*.local
+/.env
+/.env.dev
+/.env.prod
+/config/secrets/prod/prod.decrypt.private.php
+/public_html/bundles/
+/public_html/assets/bundles/
+/public_html/assets/@symfony/
+/public_html/assets/controllers/
+/public_html/assets/vendor/
+/public_html/assets/img/
+/var/
+/vendor/
+###< symfony/framework-bundle ###
+
+###> phpunit/phpunit ###
+/phpunit.xml
+.phpunit.result.cache
+###< phpunit/phpunit ###
+
+###> symfony/phpunit-bridge ###
+.phpunit.result.cache
+/phpunit.xml
+###< symfony/phpunit-bridge ###
+
+###> symfony/asset-mapper ###
+/assets/
+/assets/vendor/
+###< symfony/asset-mapper ###
+
+/.cache
+/.config
+/.subversion
+/.local
+/config/secrets/

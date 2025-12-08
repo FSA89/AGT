@@ -1,0 +1,441 @@
+{% extends 'dashboard/layout.html.twig' %}
+
+{% block title %}Сайты (ЯВМ_GSC){% endblock %}
+
+{% block body %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>🌐 Сайты (ЯВМ / GSC)</h2>
+        <div>
+            {# НОВАЯ КНОПКА #}
+            <button id="btn-verify" class="btn btn-warning text-dark me-2" title="Массовая верификация (Yandex/GSC)">🚀 Верифицировать</button>
+            
+            <button id="add-row" class="btn btn-info text-white me-2">➕ Добавить</button>
+            <button id="save-table" class="btn btn-success">💾 Сохранить изменения</button>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert d-none"></div>
+    <div id="sites-table"></div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<style>
+    /* Стиль для новой (несохраненной) строки */
+    .row-new {
+        border: 2px solid #0dcaf0 !important; 
+        background-color: #f2fcff !important; 
+        box-shadow: inset 0 0 5px rgba(13, 202, 240, 0.2); 
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    // --- 1. ДАННЫЕ ---
+    const tableData     = {{ sites_json|raw }};
+    const rawTemplates  = {{ dict_templates|raw }};
+    const rawCf         = {{ dict_cf|raw }}; 
+    const rawWebmasters = {{ dict_webmasters|raw }};
+    const rawArticles   = {{ dict_articles|raw }}; 
+    const rawCfKeys     = {{ dict_cf_keys|raw }};
+    const rawQueries    = {{ dict_articles_queries|raw }}; 
+
+    // URL для статуса
+    const statusUrlPattern = "{{ path('api_site_get_status', {'id': 999999}) }}";
+
+    // --- 2. ХЕЛПЕРЫ ---
+    function toLookup(list) {
+        let map = {};
+        list.forEach(item => map[item.id] = item.name);
+        return map;
+    }
+    function toOptionsActive(list) {
+        let opts = list.filter(item => item.active).map(item => ({label: item.name, value: item.id}));
+        opts.unshift({label: "", value: null});
+        return opts;
+    }
+    function toOptionsSimple(dict) {
+        let opts = Object.keys(dict).map(key => ({label: dict[key], value: parseInt(key)}));
+        opts.unshift({label: "", value: null});
+        return opts;
+    }
+    function toStringOptions(dict) {
+        let opts = Object.keys(dict).map(key => ({label: dict[key], value: key}));
+        opts.unshift({label: "", value: null});
+        return opts;
+    }
+
+    const lookupTemplates = toLookup(rawTemplates);
+    const optionsTemplates = toOptionsActive(rawTemplates);
+    const lookupCf = toLookup(rawCf);
+    const optionsCf = toOptionsActive(rawCf);
+    const optionsWebmasters = toStringOptions(rawWebmasters);
+    const optionsArticles   = toOptionsSimple(rawArticles);
+
+    // --- 3. ПОЛЛИНГ ---
+    const activePolls = {}; 
+    function startPolling(row) {
+        let id = row.getData().id;
+        if (!id || activePolls[id]) return; 
+
+        let url = statusUrlPattern.replace('999999', id);
+
+        activePolls[id] = setInterval(() => {
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) throw new Error("Network response was not ok");
+                    return res.json();
+                })
+                .then(data => {
+                    if(data.status === 'deleted') {
+                        clearInterval(activePolls[id]); delete activePolls[id]; return;
+                    }
+
+                    row.update({
+                        site_status: data.status,
+                        ns_status: data.ns_status,
+                        status_cf: data.status_cf,
+                        status_ns_update: data.status_ns_update,
+                        y_txt_status: data.y_txt_status, 
+                        gsc_status: data.gsc_status,
+                        ns1: data.ns1,
+                        ns2: data.ns2
+                    });
+
+                    let allStatuses = [
+                        data.status || "", 
+                        data.ns_status || "", 
+                        data.status_cf || "",
+                        data.status_ns_update || "",
+                        data.y_txt_status || "",
+                        data.gsc_status || ""
+                    ].join(" ");
+
+                    let isWaiting = allStatuses.includes('Queue') || allStatuses.includes('pending') || allStatuses.includes('cmd:') || allStatuses.includes('wait') || allStatuses.includes('Checking');
+                    
+                    if (!isWaiting) {
+                        clearInterval(activePolls[id]);
+                        delete activePolls[id];
+                        row.getElement().style.transition = "background-color 0.5s";
+                        row.getElement().style.backgroundColor = "#d1e7dd";
+                        setTimeout(() => row.getElement().style.backgroundColor = "", 1000);
+                    }
+                })
+                .catch(err => { console.error("Poll error:", err); });
+        }, 3000);
+    }
+
+    // --- 4. МГНОВЕННЫЙ ЗАПУСК (ДЛЯ МЕНЮ) ---
+    function executeCommand(cell, command) {
+        cell.setValue(command);
+        let row = cell.getRow();
+        let rowData = row.getData();
+        rowData[cell.getField()] = command;
+
+        document.body.style.cursor = 'wait';
+
+        fetch('{{ path('api_sites_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify([rowData]) 
+        })
+        .then(res => res.json())
+        .then(res => {
+            if(res.status === 'success') {
+                let updateData = {};
+                updateData[cell.getField()] = "In Queue...";
+                row.update(updateData);
+                startPolling(row);
+            } else {
+                alert('Ошибка: ' + res.message);
+                cell.setValue("Error");
+            }
+        })
+        .catch(err => { console.error(err); alert('Ошибка соединения'); })
+        .finally(() => { document.body.style.cursor = 'default'; });
+    }
+
+    // --- МАССОВАЯ ВЕРИФИКАЦИЯ (ДЛЯ КНОПКИ) ---
+    function runBulkVerification() {
+        const btn = document.getElementById('btn-verify');
+        btn.disabled = true;
+        btn.innerText = "Запуск...";
+
+        const rows = table.getRows();
+        let updates = [];
+        let rowsToPoll = [];
+
+        rows.forEach(row => {
+            let data = row.getData();
+            let yStatus = data.y_txt_status || "";
+            
+            // Условие: Есть ID, есть CF ключ, статус еще не Success и не в процессе
+            // (Можно настроить под себя, например проверять status_cf === 'Success')
+            if (
+                data.id && 
+                data.cf_api_key && 
+                !yStatus.includes('Success') && 
+                !yStatus.includes('Verified') &&
+                !yStatus.includes('Queue')
+            ) {
+                let rowData = row.getData();
+                rowData['y_txt_status'] = 'cmd:verify_yandex'; // Команда для контроллера
+                
+                // Визуальное обновление
+                row.update({y_txt_status: "⏳ In Queue..."});
+                
+                updates.push(rowData);
+                rowsToPoll.push(row);
+            }
+        });
+
+        if (updates.length === 0) {
+            alert("Нет сайтов для верификации (Нужен CF API Key и статус не Success).");
+            btn.disabled = false;
+            btn.innerText = "🚀 Верифицировать";
+            return;
+        }
+
+        fetch('{{ path('api_sites_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(updates)
+        })
+        .then(res => res.json())
+        .then(res => {
+            if(res.status === 'success') {
+                rowsToPoll.forEach(r => startPolling(r));
+            } else {
+                alert('Ошибка: ' + res.message);
+            }
+        })
+        .catch(err => { console.error(err); alert('Ошибка соединения'); })
+        .finally(() => { 
+            btn.disabled = false; 
+            btn.innerText = "🚀 Верифицировать";
+        });
+    }
+
+    // --- 5. ФОРМАТТЕРЫ ---
+    const statusFormatter = function(cell) {
+        const val = cell.getValue();
+        if(!val) return "";
+        let strVal = val.toString();
+        let color = '#333';
+        
+        if(strVal.includes('Success') || strVal.includes('OK') || strVal.includes('Verified') || strVal === 'done') color = 'green';
+        else if(strVal.includes('Error') || strVal.includes('Fail') || strVal.includes('Ошибка')) color = 'red';
+        else if(strVal.startsWith('cmd:')) color = 'blue';
+        else if(strVal.includes('pending') || strVal === 'generate' || strVal.includes('Queue')) color = '#999';
+
+        if (strVal.includes('Queue') || strVal.startsWith('cmd:') || strVal.includes('wait')) {
+            return `<span style="color:${color}; font-weight:bold;"><i class="fas fa-spinner fa-spin"></i> ${val}</span>`;
+        }
+        return `<span style="color:${color}; font-weight:bold;">${val}</span>`;
+    };
+
+    const actionMenu = function(label, command) {
+        return [
+            {
+                label: `<i class="fas fa-play-circle text-primary"></i> <b>${label}</b>`,
+                action: function(e, cell) { executeCommand(cell, command); }
+            },
+            {
+                label: "<i class='fas fa-times text-danger'></i> Очистить статус",
+                action: function(e, cell) { cell.setValue("pending"); }
+            }
+        ];
+    };
+
+    const uploadMenu = [
+        {label: "🚀 Старт выгрузки", action: function(e, cell){ executeCommand(cell, "cmd:start_upload"); }},
+        {label: "✅ Готово (Вручную)", action: function(e, cell){ executeCommand(cell, "done"); }},
+        {separator:true},
+        {label: "Очистить", action: function(e, cell){ cell.setValue("pending"); }}
+    ];
+
+
+    // --- 6. ТАБЛИЦА ---
+    var table = new Tabulator("#sites-table", {
+        data: tableData,
+        layout: "fitDataFill",
+        height: "85vh",
+        movableColumns: true,
+        pagination: "local",
+        paginationSize: 50,
+
+        rowFormatter: function(row) {
+            if(!row.getData().id) {
+                row.getElement().classList.add("row-new");
+            }
+        },
+        
+        dataLoaded: function(data) {
+            data.forEach(row => {
+                // Если есть любые зависшие задачи, возобновляем слежку
+                let s1 = row.site_status || "";
+                let s2 = row.status_cf || "";
+                let s3 = row.status_ns_update || "";
+                let s4 = row.y_txt_status || "";
+
+                if (s1.includes('Queue') || s2.includes('Queue') || s3.includes('Queue') || s4.includes('Queue') ||
+                    s1.startsWith('cmd:') || s2.startsWith('cmd:') || s3.startsWith('cmd:') || s4.startsWith('cmd:')) {
+                    
+                    let tableRow = table.getRow(row.id);
+                    if(tableRow) startPolling(tableRow);
+                }
+            });
+        },
+        
+        columns: [
+            {title:"ID", field:"id", width:100, frozen:true},
+        
+            // ДОМЕН
+            {
+                title:"Домен (Статья)", field:"article_id", width:250, editor:"list", 
+                editorParams:{ values: optionsArticles, autocomplete: true, listOnEmpty: true, clearable: true },
+                formatter: "lookup", formatterParams: rawArticles, frozen: true, headerFilter:"input",
+                cellEdited: function(cell) {
+                    let articleId = cell.getValue();
+                    let newQuery = (articleId && rawQueries[articleId]) ? rawQueries[articleId] : "";
+                    cell.getRow().update({main_query: newQuery});
+                }
+            }, 
+            {title:"Query", field:"main_query", width:150, editor:"input", headerFilter:"input"},
+
+            // РЕГИСТРАЦИЯ
+            {title:"Регистратор", field:"registrar", editor:"list", width:200, editorParams:{ values: ["", "dynadot", "namesilo"] }},
+            {
+                title:"Статус Рег.", field:"status_registration", width:160, formatter:statusFormatter,
+                clickMenu: actionMenu("Зарегистрировать", "cmd:register")
+            },
+
+            // ВЕБМАСТЕР
+            {title:"Вебмастер", field:"webmaster", editor:"list", width:150, editorParams:{ values: optionsWebmasters, autocomplete: true, listOnEmpty: true, clearable: true }},
+            {
+                title:"Y.Webmaster", field:"y_txt_status", width:150, formatter:statusFormatter,
+                // Меню работает через executeCommand
+                clickMenu: actionMenu("Верифицировать", "cmd:verify_yandex")
+            },
+            {
+                title:"G.Webmaster", field:"gsc_status", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Верифицировать (Google)", "cmd:verify_gsc")
+            },
+            {
+                title:"Индексация", field:"indexing_status", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Проиндексировать", "cmd:send_index")
+            },
+
+            // CLOUDFLARE
+            {
+                title:"CF Email", field:"cf_account_id", width:200, editor:"list", 
+                editorParams:{ values:optionsCf, clearable:true }, formatter: "lookup", formatterParams: lookupCf,
+                cellEdited: function(cell) {
+                    let cfId = cell.getValue();
+                    let newKey = (cfId && rawCfKeys[cfId]) ? rawCfKeys[cfId] : "";
+                    cell.getRow().update({cf_api_key: newKey});
+                }
+            },
+            {title:"CF API Key", field:"cf_api_key", width:200, editor:"input"}, 
+            {
+                title:"Статус CF", field:"status_cf", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Добавить в CF", "cmd:add_to_cf")
+            },
+
+            // NS
+            {
+                title:"Обновление NS", field:"status_ns_update", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Обновить NS", "cmd:update_ns")
+            },
+            {title:"NS1", field:"ns1", editor:"input", width:150},
+            {title:"NS2", field:"ns2", editor:"input", width:150},
+            {
+                title:"Проверка NS", field:"ns_status", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Проверить NS", "cmd:check_ns")
+            },
+
+            // ОСТАЛЬНОЕ
+            {
+                title:"Прокси", field:"status_proxy", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Настроить прокси", "cmd:setup_proxy")
+            },
+            {
+                title:"Шаблон", field:"template_id", width:150, editor:"list", 
+                editorParams:{ values:optionsTemplates, clearable:true }, formatter: "lookup", formatterParams: lookupTemplates 
+            },
+            {
+                title:"Полный цикл", field:"full_cycle_status", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Запустить цикл", "cmd:run_full_cycle")
+            },
+            {
+                title:"Выгрузка", field:"upload_status", width:150, formatter:statusFormatter, clickMenu: uploadMenu 
+            },
+            {title:"Дата", field:"publish_date", editor:"date", width:120, editorParams:{format:"YYYY-MM-DD"}},
+            {
+                title:"Статус сайта", field:"site_status", width:150, formatter:statusFormatter,
+                clickMenu: actionMenu("Проверить доступность", "cmd:check_availability")
+            },
+            {formatter:"buttonCross", width:50, align:"center", headerSort:false, cellClick:function(e, cell){
+                if(confirm("Удалить сайт из панели?")) {
+                    let id = cell.getRow().getData().id;
+                    if(id) {
+                         fetch('{{ path('api_sites_delete') }}', { method: 'POST', body: JSON.stringify({id: id}) }).then(() => cell.getRow().delete());
+                    } else {
+                        cell.getRow().delete();
+                    }
+                }
+            }}
+        ],
+    });
+
+    // --- 7. КНОПКИ ---
+    document.getElementById("add-row").addEventListener("click", function(){
+        const newRowData = {
+            status_registration: 'pending', y_txt_status: 'pending', indexing_status: 'pending',
+            status_cf: 'pending', status_ns_update: 'pending', ns_status: 'pending',
+            status_proxy: 'pending', full_cycle_status: 'pending', upload_status: 'pending', site_status: 'pending'
+        };
+        table.addRow(newRowData).then(function(row){
+            table.scrollToRow(row, "top", true);
+            row.getElement().classList.add("row-new");
+        });
+    });
+
+    // КНОПКА МАССОВОЙ ВЕРИФИКАЦИИ
+    document.getElementById("btn-verify").addEventListener("click", function(){
+        runBulkVerification();
+    });
+
+    document.getElementById("save-table").addEventListener("click", function(){
+        const btn = this;
+        const msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        btn.innerText = "Сохранение...";
+
+        fetch('{{ path('api_sites_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(table.getData())
+        })
+        .then(res => res.json())
+        .then(res => {
+            msg.className = res.status === 'success' ? 'alert alert-success' : 'alert alert-danger';
+            msg.innerText = res.message;
+            msg.classList.remove('d-none');
+            setTimeout(() => msg.classList.add('d-none'), 3000);
+            
+            if(res.status === 'success') setTimeout(() => location.reload(), 1000);
+        })
+        .catch(err => {
+            console.error(err);
+            msg.className = 'alert alert-danger';
+            msg.innerText = 'Ошибка сохранения';
+            msg.classList.remove('d-none');
+        })
+        .finally(() => btn.disabled = false);
+    });
+});
+</script>
+{% endblock %}

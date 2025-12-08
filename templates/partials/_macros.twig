@@ -1,0 +1,9 @@
+{% macro role_label(role) %}
+    {% if role == 'ROLE_ADMIN' %}
+        Администратор
+    {% elseif role == 'ROLE_USER' %}
+        Пользователь
+    {% else %}
+        {{ role }}
+    {% endif %}
+{% endmacro %}

@@ -1,0 +1,206 @@
+{% extends 'dashboard/layout.html.twig' %}
+
+{% block title %}Справочник: Cloudflare Аккаунты{% endblock %}
+
+{% block body %}
+<div class="container-fluid px-4 mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>☁️ Справочник: Cloudflare Аккаунты</h2>
+        <div>
+            <button id="add-row" class="btn btn-info text-white me-2">➕ Добавить</button>
+            <button id="save-table" class="btn btn-success">💾 Сохранить</button>
+        </div>
+    </div>
+    
+    <div id="status-msg" class="alert d-none"></div>
+    <div id="cf-table"></div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<style>
+    /* Стиль для свернутого ключа */
+    .compact-view {
+        max-height: 40px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: monospace;
+        color: #555;
+        font-size: 12px;
+        cursor: pointer;
+        padding-top: 4px;
+    }
+    .compact-view::before {
+        content: "\f084"; /* Иконка "ключ" */
+        font-family: "Font Awesome 6 Free"; 
+        font-weight: 900;
+        margin-right: 5px;
+        color: #0d6efd;
+    }
+
+    /* Развернутый редактор для ключа */
+    .tabulator-cell textarea {
+        min-height: 100px !important; 
+        min-width: 300px !important;
+        font-family: monospace;
+        font-size: 13px;
+        z-index: 1000;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    
+    const tableData = {{ table_json|raw }};
+
+    // Форматтер для длинных ключей
+    const compactFormatter = function(cell) {
+        let val = cell.getValue();
+        if(!val) return "";
+        return `<div class="compact-view" title="Нажмите, чтобы редактировать">${val}</div>`;
+    };
+
+    // ИСПРАВЛЕНО: Форматтер для счетчика с порогом 10
+    const statusFormatter = function(cell) {
+        let val = cell.getValue();
+        // Если значение пустое или null, считаем 0
+        val = parseInt(val) || 0;
+
+        let color = '#0d6efd'; // По умолчанию Синий (для 1-4)
+        
+        if (val === 0) {
+            color = '#198754'; // Зеленый (Свежий, 0)
+        } else if (val >= 5) {
+            color = '#dc3545'; // Красный (Перегружен, 5+)
+        }
+
+        return `<span style="color:${color}; font-weight:bold; font-size: 1.1em;">${val}</span>`;
+    };
+
+    var table = new Tabulator("#cf-table", {
+        data: tableData,
+        layout: "fitDataFill",
+        height: "80vh",
+        movableColumns: true,
+
+         // Подсветка новых строк
+        rowFormatter: function(row) {
+            if(!row.getData().id) {
+                row.getElement().classList.add("row-new");
+            }
+        },
+        
+        columns: [
+            {title:"ID", field:"id", width:100, frozen:true},
+            
+            // Email
+            {title:"Email (Логин)", field:"cf_email", editor:"input", width:250, headerFilter:"input", frozen:true},
+
+            // Пароль
+            {title:"Пароль", field:"cf_pass", editor:"input", width:150},
+
+            // API Key (Сворачиваемый)
+            {
+                title:"Global API Key", 
+                field:"cf_api_key", 
+                width:300,
+                formatter: compactFormatter,
+                editor: "textarea"
+            },
+
+            // Статус (Счетчик)
+            {
+                title:"Использован (раз)", 
+                field:"status", 
+                editor:"number", 
+                width:200, 
+                headerHozAlign: "center",
+                hozAlign: "center",
+                formatter: statusFormatter
+            },
+
+            // Вкл/Выкл
+            {
+                title:"Вкл", 
+                field:"is_active", 
+                editor:true, 
+                formatter:"tickCross", 
+                hozAlign:"center", 
+                width:100,
+                editorParams:{
+                    tristate:false,
+                    indeterminateValue:null
+                }
+            },
+
+            // Удаление
+            { title:"Удалить", formatter:"buttonCross", width:100, align:"center", headerSort:false, cellClick:function(e, cell){
+                if(confirm("Удалить этот аккаунт?")) {
+                    let id = cell.getRow().getData().id;
+                    if(id) {
+                         fetch('{{ path('api_cloudflare_delete') }}', {
+                            method: 'POST',
+                            body: JSON.stringify({id: id})
+                        }).then(() => cell.getRow().delete());
+                    } else {
+                        cell.getRow().delete();
+                    }
+                }
+            }}
+        ],
+    });
+
+    // Кнопки
+    document.getElementById("add-row").addEventListener("click", function(){
+        
+         // Данные новой строки
+        const newRowData = {
+             cf_email: "",
+            status: 0, // По умолчанию 0 использований
+            is_active: true
+        };
+
+        // Добавляем строку и скроллим к ней
+        table.addRow(newRowData).then(function(row){
+            // 1. Плавный скролл
+            table.scrollToRow(row, "top", true);
+            
+            // 2. Фокус в первую ячейку 
+            row.getCells()[1].edit(); 
+        });
+    });
+
+    document.getElementById("save-table").addEventListener("click", function(){
+        const btn = this;
+        const msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        btn.innerText = "Сохранение...";
+
+        fetch('{{ path('api_cloudflare_save') }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(table.getData())
+        })
+        .then(res => res.json())
+        .then(res => {
+            msg.className = res.status === 'success' ? 'alert alert-success' : 'alert alert-danger';
+            msg.innerText = res.message;
+            msg.classList.remove('d-none');
+            setTimeout(() => msg.classList.add('d-none'), 3000);
+            
+            if(res.status === 'success') {
+                setTimeout(() => location.reload(), 1000);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            msg.className = 'alert alert-danger';
+            msg.innerText = 'Ошибка сохранения';
+            msg.classList.remove('d-none');
+        })
+        .finally(() => btn.disabled = false);
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,17 @@
+nelmio_cors:
+  defaults:
+    allow_credentials: true
+    allow_origin: ["*"]
+    allow_headers: ["Content-Type", "Authorization"]
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    expose_headers: ["Link"]
+    max_age: 3600
+  paths:
+    "^/api/":
+      allow_origin:
+        - "https://agt.ant-team.ru"
+      allow_methods: ["GET", "POST", "OPTIONS", "PUT", "DELETE"]
+      allow_headers: ["Content-Type", "Authorization"]
+      expose_headers: ["Link"]
+      max_age: 3600
+    #   hosts: ['^qwe\.exemple\.ru$']
