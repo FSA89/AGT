@@ -86,6 +86,14 @@
                         </ul>
                     </li>
 
+                    {# 3. САЙТЫ #}
+                    <li class="nav-item">
+                        <a class="nav-link {% if app.request.get('_route') == 'dashboard_sites' %}active{% endif %}" 
+                        href="">
+                            <i class="fas fa-globe"></i> Шаблоны промтов
+                        </a>
+                    </li>
+
                     <li class="nav-item">
                         <a class="nav-link" 
                         href="{{ path('app_generate') }}">
